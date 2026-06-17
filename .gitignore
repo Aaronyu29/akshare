@@ -80,6 +80,8 @@ Thumbs.db
 *.xml
 /data
 /tests/data
+/research/cache/
+/research/reports/
 
 # Documentation
 docs/build/
