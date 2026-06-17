@@ -26,6 +26,17 @@ opportunities.
 - ETF requirement: every report must include actionable ETF choices. If
   individual-stock conviction is weak, ETFs become the fallback implementation.
   ETF reports must include fees and other practical trading details.
+- US trigger: the user can provide US-side context directly, including price
+  moves, earnings, company news, social-media discussion, and other catalyst
+  notes. The agent should then search externally, verify, summarize, and feed the
+  structured trigger into the program.
+- A-share overheating filter: avoid candidates with excessively high RSI,
+  overheated speculation, or obvious short-term crowding.
+- Black-history filter: avoid companies with serious past issues, including
+  fraud, regulatory penalties, repeated disclosure problems, major governance
+  concerns, or other red flags.
+- Report trading plan: every report must include entry conditions, take-profit
+  conditions, and stop-loss / invalidation conditions.
 - Output format: Markdown reports first.
 - Implementation timing: finish research design discussion before writing more
   code.
@@ -41,6 +52,8 @@ opportunities.
    product launches, policy events, US stock earnings, or A-share theme heat?
 4. Should the report include an explicit "do not buy / avoid" section for concept
    names that look noisy or overhyped?
+5. For RSI and overheating, what default threshold should we use later: RSI > 70,
+   RSI > 75, or a combined rule using RSI, recent涨幅, turnover, and board heat?
 
 ## Goal
 
@@ -105,6 +118,29 @@ NVDA -> AI accelerator cycle
   -> advanced packaging
   -> semiconductor equipment and materials
 ```
+
+### 2.5. Verify US Trigger
+
+The user may provide raw US-side trigger material directly:
+
+- US stock price move and magnitude.
+- Earnings growth, guidance, and margin changes.
+- Company press releases.
+- Product launches.
+- News and industry reports.
+- Social-media discussion and market narratives.
+
+Agent responsibility:
+
+- Search externally when needed.
+- Verify dates, source quality, and whether the trigger is new or already priced
+  in.
+- Extract the affected supply-chain links.
+- Convert unstructured context into structured fields for the Python pipeline.
+
+The local program should not be expected to independently understand all
+unstructured US-side context. It should receive a cleaned trigger packet from the
+agent.
 
 ### 3. Fetch Data
 
@@ -177,7 +213,7 @@ Initial scoring dimensions:
 | Chip structure | Profit/loss holder distribution, its change speed, and whether profitable chips are becoming more concentrated | 15 |
 | Tradability | Liquidity, volatility, entry/exit practicality, and market depth | 15 |
 | Speculative potential | Catalyst density, narrative clarity, and theme heat | 15 |
-| Risk penalty | ST, extreme valuation, poor liquidity, weak disclosure | -20 to 0 |
+| Risk penalty | ST, BSE, RSI overheating, excessive speculation, weak disclosure, black-history issues, extreme valuation, or poor liquidity | -30 to 0 |
 
 Default total score:
 
@@ -194,6 +230,10 @@ Each result should be grouped into:
 - `ETF implementation`: actionable ETF exposure and benchmark when stock
   conviction is weak or when a basket is more practical.
 - `avoid / concept-only`: weak evidence or mostly hype.
+- `avoid / overheated`: strong theme but RSI,涨幅, turnover, or crowding suggests
+  poor entry timing.
+- `avoid / black-history`: serious historical governance, fraud, disclosure,
+  penalty, or credibility issues.
 
 ### 7. Generate Research Pack
 
@@ -205,6 +245,9 @@ Output should include:
 - Evidence notes.
 - Risks.
 - Holding hypothesis.
+- Entry conditions.
+- Take-profit conditions.
+- Stop-loss and invalidation conditions.
 - Follow-up checks.
 - Data-source notes.
 
@@ -213,6 +256,12 @@ Example candidate row:
 | Symbol | Name | Match | Score | Evidence | Risk | Hypothesis |
 | --- | --- | --- | ---: | --- | --- | --- |
 | 000000 | Example Co | liquid cooling | 78 | Concept board + turnover + revenue clue | valuation high | Watch next two quarters for AI server orders |
+
+Example trading-plan row:
+
+| Symbol | Entry Conditions | Take Profit | Stop Loss / Invalidation |
+| --- | --- | --- | --- |
+| 000000 | RSI cools down, price holds key support, volume contracts after theme pullback | Theme reaches crowded phase, valuation rerates sharply, or catalyst is priced in | Order evidence is disproved, price breaks support, or sector heat collapses |
 
 Example ETF row:
 
@@ -255,6 +304,8 @@ The local Python layer can handle:
 - Mechanical scoring for liquidity, price behavior, fund flow, and simple
   financial metrics.
 - Generating Markdown reports from structured inputs.
+- Computing mechanical technical filters such as RSI, recent涨幅, turnover, and
+  volume-price behavior.
 
 A research agent is useful for:
 
@@ -267,6 +318,9 @@ A research agent is useful for:
 - Explaining why a candidate is a true supply-chain beneficiary instead of a
   concept-board passenger.
 - Flagging weak, circular, or rumor-like evidence.
+- Checking black-history issues such as penalties, fraud allegations, repeated
+  disclosure problems, governance problems, and prior market credibility damage.
+- Turning user-provided US trigger material into a structured trigger packet.
 
 Recommended design:
 
@@ -324,6 +378,7 @@ Hard exclusions:
 
 - Beijing Stock Exchange stocks.
 - ST stocks.
+- Serious black-history issues.
 
 Allowed unless later excluded by scoring:
 
@@ -337,6 +392,19 @@ Allowed unless later excluded by scoring:
 The first version should avoid over-filtering. We prefer to keep possible theme
 winners in the universe, then downgrade them through risk and tradability scores
 instead of removing them too early.
+
+Soft exclusions and downgrades:
+
+- RSI is too high.
+- Short-term speculation is too aggressive.
+- Recent涨幅 is too large relative to evidence.
+- Turnover and board heat suggest crowded trading.
+- The company has unresolved credibility issues that are not severe enough for a
+  hard exclusion.
+
+When a stock is fundamentally relevant but overheated, the report should keep it
+as a watchlist or avoid/overheated candidate and specify what cooling condition
+would make it actionable again.
 
 ## Data Quality Rules
 
