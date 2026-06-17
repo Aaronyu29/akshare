@@ -37,6 +37,17 @@ opportunities.
   concerns, or other red flags.
 - Report trading plan: every report must include entry conditions, take-profit
   conditions, and stop-loss / invalidation conditions.
+- First interface: a command-line tool is acceptable for v1, but manual
+  agent-triggered runs are also acceptable. Input format is not the priority;
+  the system should accept practical research notes first and structure them
+  internally.
+- Input material: user-provided context can include companies, tickers, code
+  names, product names, customer names, supply-chain clues, news snippets, and
+  precise custom notes.
+- Local cache: the architecture must include local caching from the beginning to
+  reduce provider pressure and support repeatable review.
+- Reports: generated Markdown reports should be written to a common reports
+  directory with date/time in the filename.
 - Output format: Markdown reports first.
 - Implementation timing: finish research design discussion before writing more
   code.
@@ -421,6 +432,7 @@ Proposed structure:
 
 ```text
 research/
+  cache/                 # cached raw and normalized data, ignored by git
   data_sources.py        # provider wrappers and fallback logic
   probe_market_data.py   # smoke tests
   mappings.py            # US ticker / keyword -> China theme mappings
@@ -428,7 +440,17 @@ research/
   scoring.py             # scoring rules
   report.py              # Markdown/CSV output
   cli.py                 # command-line entry point
+  reports/               # generated Markdown reports, likely ignored by git
 ```
+
+Report filename convention:
+
+```text
+research/reports/{US_SYMBOL}_{theme_slug}_{YYYYMMDD_HHMMSS}.md
+```
+
+The first version can be driven either by a CLI command or by the agent preparing
+a structured request and invoking the same internal pipeline.
 
 ## Near-Term Milestones
 
