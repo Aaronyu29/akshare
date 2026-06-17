@@ -339,6 +339,96 @@ Recommended design:
 - The research agent reviews unstructured evidence and writes evidence notes.
 - The final score combines mechanical data and agent-reviewed evidence tiers.
 
+## Agent SDK Architecture
+
+The recommended production path is to use the OpenAI Agents SDK as the
+orchestration layer, not to make the local data pipeline depend directly on the
+current Codex desktop session.
+
+Official capabilities we can use:
+
+- `Agent` and `Runner` for agent execution.
+- Function tools to expose Python functions such as data fetching, candidate
+  building, scoring, and report generation.
+- Agents-as-tools or handoffs for specialized research roles.
+- Guardrails for structured output and risk checks.
+- Sessions/tracing later for persistence and debugging.
+- Experimental Codex tool later for workspace-scoped coding or document-editing
+  tasks when needed.
+
+Important distinction:
+
+- The current Codex app is our development environment.
+- The OpenAI Agents SDK is what our Python program can import and run.
+- The SDK can use OpenAI models and tools through API credentials.
+- The SDK's experimental Codex tool can run workspace-scoped Codex tasks, but it
+  should be treated as optional and experimental.
+
+Recommended v1 approach:
+
+```text
+User raw context
+  -> research agent verifies and structures US trigger
+  -> Python tools fetch A-share / ETF / board / financial data
+  -> scoring pipeline ranks candidates
+  -> research agent writes evidence notes and trading plan
+  -> Markdown report is saved to research/reports/
+```
+
+Recommended specialized agents:
+
+- `TriggerResearchAgent`: verifies US-side catalysts from user-provided notes,
+  external search, earnings, news, and social-media narratives.
+- `EvidenceAgent`: reads unstructured A-share evidence such as announcements,
+  annual reports, investor Q&A, and research-report snippets.
+- `RiskAgent`: checks overheating, black-history issues, disclosure quality, and
+  credibility red flags.
+- `ReportAgent`: turns structured scores and evidence into a concise Markdown
+  report.
+
+Recommended Python tools:
+
+- `fetch_a_stock_spot`
+- `fetch_etf_spot`
+- `build_candidate_universe`
+- `score_candidates`
+- `compute_technical_filters`
+- `get_etf_fee_and_liquidity`
+- `write_markdown_report`
+
+Why keep an adapter boundary:
+
+- The core research pipeline should still work without an API key.
+- Agent review is valuable but should not be required for basic data pulls and
+  mechanical scoring.
+- We can test scoring, filtering, caching, and report generation locally.
+- When `OPENAI_API_KEY` is configured later, the same pipeline can run with
+  agent-reviewed evidence.
+
+Proposed package shape:
+
+```text
+research/
+  agents/
+    __init__.py
+    sdk_adapter.py        # optional OpenAI Agents SDK integration
+    prompts.py            # agent instructions and output contracts
+    schemas.py            # structured trigger/evidence/report models
+  tools/
+    __init__.py
+    market_tools.py       # wraps data_sources.py functions as agent tools
+    scoring_tools.py      # wraps scoring and technical filters
+    report_tools.py       # report-writing tool
+```
+
+Dependency policy:
+
+- Keep `openai-agents` optional at first.
+- Do not require `OPENAI_API_KEY` for non-agent runs.
+- If the dependency or API key is missing, fall back to a manual-agent workflow:
+  Codex/user provides structured trigger and evidence notes, then Python runs the
+  deterministic pipeline.
+
 ## Chip Structure
 
 Chip structure is a large topic and should initially be treated as a scored
