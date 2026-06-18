@@ -12,6 +12,7 @@ from research.cache import (
     build_metadata,
     cache_path,
     load_json,
+    safe_cache_component,
     save_json,
 )
 from research.cli import main as cli_main
@@ -22,6 +23,7 @@ from research.data_sources import (
     fetch_eastmoney_a_stock_spot_direct,
 )
 from research.filters import apply_filters
+from research.mappings import expand_keywords, get_ticker_mapping
 from research.pipeline import build_trigger_packet, run_research
 from research.report import render_markdown_report
 from research.schemas import (
@@ -45,6 +47,15 @@ class ResearchLayerTest(unittest.TestCase):
         self.assertEqual(settings.core_candidate_target, 3)
         self.assertEqual(settings.max_core_candidates, 8)
         self.assertLess(settings.score_weights.min_risk_penalty, 0)
+
+    def test_spcx_expands_aerospace_board_aliases(self) -> None:
+        mapping = get_ticker_mapping("SPCX")
+        keywords = expand_keywords("SPCX", ["\u822a\u7a7a\u822a\u5929"])
+
+        self.assertIsNotNone(mapping)
+        self.assertIn("\u822a\u5929\u822a\u7a7a", keywords)
+        self.assertIn("\u5546\u4e1a\u822a\u5929", keywords)
+        self.assertIn("\u822a\u7a7a\u88c5\u5907", keywords)
 
     def test_cache_json_round_trip_and_freshness(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -75,6 +86,29 @@ class ResearchLayerTest(unittest.TestCase):
             save_json(path, {"ok": True}, metadata)
 
             self.assertEqual(load_json(path, require_fresh=True), {"ok": True})
+
+    def test_cache_path_sanitizes_provider_for_windows(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = CacheSettings(
+                cache_dir=root,
+                raw_dir=root / "raw",
+                normalized_dir=root / "normalized",
+                evidence_dir=root / "evidence",
+            )
+
+            path = cache_path(
+                "normalized",
+                "eastmoney_direct:push2delay.eastmoney.com",
+                "a_stock_spot",
+                settings=settings,
+            )
+
+            self.assertEqual(
+                safe_cache_component("eastmoney_direct:push2delay.eastmoney.com"),
+                "eastmoney_direct_push2delay.eastmoney.com",
+            )
+            self.assertIn("eastmoney_direct_push2delay.eastmoney.com", path.parts)
 
     def test_provider_fallback_returns_first_non_empty_frame(self) -> None:
         calls: list[str] = []

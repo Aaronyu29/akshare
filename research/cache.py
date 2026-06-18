@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,13 @@ def params_hash(params: dict[str, Any] | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def safe_cache_component(value: str) -> str:
+    """Return a filesystem-safe cache path component."""
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value.strip())
+    safe = safe.strip(" .")
+    return safe or "_"
+
+
 def cache_path(
     namespace: str,
     provider: str,
@@ -50,7 +58,7 @@ def cache_path(
     }
     root = root_map.get(namespace, settings.cache_dir / namespace)
     filename = f"{params_hash(params)}.{extension.lstrip('.')}"
-    return root / provider / dataset / filename
+    return root / safe_cache_component(provider) / safe_cache_component(dataset) / filename
 
 
 def metadata_path(data_path: Path) -> Path:

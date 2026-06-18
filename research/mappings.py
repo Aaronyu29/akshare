@@ -20,6 +20,48 @@ def _node(name: str, *keywords: str, children: list[ThemeNode] | None = None) ->
 
 
 THEME_MAPPINGS: dict[str, TickerMapping] = {
+    "SPCX": TickerMapping(
+        symbol="SPCX",
+        keywords=[
+            "SPCX",
+            "space",
+            "commercial space",
+            "satellite",
+            "rocket",
+            "low earth orbit",
+            "aerospace",
+            "\u822a\u7a7a\u822a\u5929",
+            "\u822a\u5929\u822a\u7a7a",
+            "\u5546\u4e1a\u822a\u5929",
+            "\u901a\u7528\u822a\u7a7a",
+            "\u822a\u7a7a\u88c5\u5907",
+            "\u822a\u5929\u88c5\u5907",
+            "\u536b\u661f\u4e92\u8054\u7f51",
+        ],
+        themes=[
+            _node(
+                "commercial space",
+                "\u5546\u4e1a\u822a\u5929",
+                "\u822a\u5929\u822a\u7a7a",
+                "\u536b\u661f\u4e92\u8054\u7f51",
+                "satellite",
+                "rocket",
+            ),
+            _node(
+                "aerospace equipment",
+                "\u822a\u7a7a\u88c5\u5907",
+                "\u822a\u5929\u88c5\u5907",
+                "\u822a\u7a7a\u822a\u5929",
+                "\u822a\u5929\u822a\u7a7a",
+            ),
+            _node(
+                "general aviation",
+                "\u901a\u7528\u822a\u7a7a",
+                "\u822a\u7a7a\u673a\u573a",
+                "\u822a\u7a7a\u8fd0\u8f93",
+            ),
+        ],
+    ),
     "NVDA": TickerMapping(
         symbol="NVDA",
         keywords=[
@@ -135,6 +177,26 @@ THEME_MAPPINGS: dict[str, TickerMapping] = {
     ),
 }
 
+KEYWORD_ALIASES: dict[str, list[str]] = {
+    "\u822a\u7a7a\u822a\u5929": [
+        "\u822a\u5929\u822a\u7a7a",
+        "\u5546\u4e1a\u822a\u5929",
+        "\u901a\u7528\u822a\u7a7a",
+        "\u822a\u7a7a\u88c5\u5907",
+        "\u822a\u5929\u88c5\u5907",
+        "\u822a\u7a7a\u673a\u573a",
+        "\u822a\u7a7a\u8fd0\u8f93",
+        "\u536b\u661f\u4e92\u8054\u7f51",
+    ],
+    "\u822a\u5929\u822a\u7a7a": [
+        "\u822a\u7a7a\u822a\u5929",
+        "\u5546\u4e1a\u822a\u5929",
+        "\u901a\u7528\u822a\u7a7a",
+        "\u822a\u7a7a\u88c5\u5907",
+        "\u822a\u5929\u88c5\u5907",
+    ],
+}
+
 
 def get_ticker_mapping(symbol: str) -> TickerMapping | None:
     return THEME_MAPPINGS.get(symbol.upper())
@@ -149,6 +211,8 @@ def expand_keywords(symbol: str, keywords: list[str] | None = None) -> list[str]
             values.append(theme.name)
             values.extend(theme.keywords)
     values.extend(keywords or [])
+    for keyword in keywords or []:
+        values.extend(KEYWORD_ALIASES.get(keyword.strip(), []))
     seen: set[str] = set()
     result: list[str] = []
     for value in values:
