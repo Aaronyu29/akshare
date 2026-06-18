@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pandas as pd
+import requests
 
 from research.cache import (
     build_metadata,
@@ -14,7 +16,11 @@ from research.cache import (
 )
 from research.cli import main as cli_main
 from research.config import CacheSettings, get_default_settings
-from research.data_sources import _first_success
+from research.data_sources import (
+    _fetch_eastmoney_clist,
+    _first_success,
+    fetch_eastmoney_a_stock_spot_direct,
+)
 from research.filters import apply_filters
 from research.pipeline import build_trigger_packet, run_research
 from research.report import render_markdown_report
@@ -97,6 +103,87 @@ class ResearchLayerTest(unittest.TestCase):
         self.assertEqual(result.row_count, 1)
         self.assertEqual(calls, ["fail", "empty", "success"])
         self.assertTrue(any("bad" in warning for warning in result.warnings))
+
+    def test_first_success_records_actual_eastmoney_host(self) -> None:
+        def success() -> pd.DataFrame:
+            frame = pd.DataFrame({"f12": ["300750"], "f14": ["CATL"]})
+            frame.attrs["eastmoney_host"] = "push2.eastmoney.com"
+            return frame
+
+        result = _first_success([("eastmoney_direct", success)])
+
+        self.assertEqual(result.provider, "eastmoney_direct:push2.eastmoney.com")
+
+    def test_eastmoney_clist_host_fallback_and_pagination(self) -> None:
+        calls: list[str] = []
+
+        class FakeResponse:
+            def __init__(self, payload: dict):
+                self._payload = payload
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return self._payload
+
+        def fake_get(url: str, **kwargs) -> FakeResponse:
+            host = url.split("/")[2]
+            page = str(kwargs["params"]["pn"])
+            calls.append(f"{host}:{page}")
+            if host == "bad.eastmoney.com":
+                raise requests.Timeout("slow host")
+            payloads = {
+                "1": {
+                    "rc": 0,
+                    "data": {
+                        "total": 3,
+                        "diff": [
+                            {"f12": "300750", "f14": "CATL", "f3": 1.0},
+                            {"f12": "002371", "f14": "NAURA", "f3": 2.0},
+                        ],
+                    },
+                },
+                "2": {
+                    "rc": 0,
+                    "data": {
+                        "total": 3,
+                        "diff": [{"f12": "688981", "f14": "SMIC", "f3": -1.0}],
+                    },
+                },
+            }
+            return FakeResponse(payloads[page])
+
+        with patch("research.data_sources.requests.get", side_effect=fake_get):
+            frame = _fetch_eastmoney_clist(
+                {
+                    "pn": "1",
+                    "pz": "2",
+                    "fields": "f12,f14,f3",
+                    "fs": "m:0 t:6",
+                },
+                hosts=("bad.eastmoney.com", "push2.eastmoney.com"),
+            )
+
+        self.assertEqual(frame.attrs["eastmoney_host"], "push2.eastmoney.com")
+        self.assertEqual(frame.shape[0], 3)
+        self.assertEqual(
+            calls,
+            [
+                "bad.eastmoney.com:1",
+                "push2.eastmoney.com:1",
+                "push2.eastmoney.com:2",
+            ],
+        )
+
+    def test_eastmoney_a_stock_direct_uses_clist_client(self) -> None:
+        with patch("research.data_sources._fetch_eastmoney_clist") as fetch:
+            fetch.return_value = pd.DataFrame({"f12": ["300750"], "f14": ["CATL"]})
+
+            frame = fetch_eastmoney_a_stock_spot_direct()
+
+        self.assertEqual(frame.iloc[0]["f12"], "300750")
+        self.assertIn("m:0 t:6", fetch.call_args.args[0]["fs"])
 
     def test_filters_hard_exclude_st_and_bse(self) -> None:
         candidates = [
