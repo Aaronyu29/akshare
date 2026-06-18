@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
+import sys
 
 import akshare as ak
 import pandas as pd
 
-from data_sources import fetch_a_stock_spot, fetch_etf_spot
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from research.data_sources import fetch_a_stock_spot, fetch_etf_spot
 
 
 Probe = tuple[str, Callable[[], pd.DataFrame]]
@@ -33,7 +38,7 @@ def main() -> None:
     ]:
         print(f"\n## {name}")
         try:
-            result = fetch()
+            result = fetch(use_cache=False)
         except Exception as exc:  # noqa: BLE001 - probe should report all failures
             print(f"FAIL {type(exc).__name__}: {exc}")
         else:

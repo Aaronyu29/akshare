@@ -14,6 +14,20 @@ unblocks an earlier one.
 - Do not add trading or broker integration.
 - Do not run `codex logout`, `chatgpt logout`, or clear auth credentials.
 
+## Implementation Status
+
+- [x] Research layer package added under `research/`.
+- [x] Deterministic CLI pipeline implemented without requiring `OPENAI_API_KEY`.
+- [x] A-share, ETF, board, history, and ETF profile data-source wrappers added.
+- [x] Eastmoney-first provider fallback added where practical.
+- [x] Cache, config, schemas, mappings, universe, enrichment, filters, scoring, report, and agent/tool adapter modules implemented.
+- [x] Markdown report output writes to ignored `research/reports/`.
+- [x] Cache output writes to ignored `research/cache/`.
+- [x] Local compile passed for `research/` and research tests.
+- [x] `pytest` installed in local `.venv`.
+- [x] Unit tests passed: `8 passed`.
+- [x] Live data probe passed for A-share spot/history and ETF spot/history.
+
 ## Milestone 0: Repo Hygiene
 
 - [ ] Confirm branch is `feature/us-a-share-research`.
