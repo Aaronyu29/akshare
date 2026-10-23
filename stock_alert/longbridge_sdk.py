@@ -13,8 +13,6 @@ from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
 
-DEFAULT_ENV_FILE = Path(r"C:\githubProject\.env-lark")
-
 
 @dataclass(frozen=True)
 class QuoteCredentials:
@@ -28,35 +26,68 @@ class LongbridgeError(RuntimeError):
 
 
 def read_quote_credentials(env_file=None, environ=None):
+    env = os.environ if environ is None else environ
+    suffixes = ("APP_KEY", "APP_SECRET", "ACCESS_TOKEN")
+
+    def complete(values, names):
+        items = [values.get(name, "") or "" for name in names]
+        if not all(item.strip() for item in items):
+            raise LongbridgeError(
+                "Incomplete Longbridge credentials; configure all three fields in one source"
+            )
+        return QuoteCredentials(*(item.strip() for item in items))
+
+    # Select a complete credential group; never combine tokens across sources.
+    # *_FILE supports Docker/Kubernetes Secret mounts without environment values.
+    for prefix in ("LONGBRIDGE_", "LONGPORT_"):
+        names = tuple(prefix + suffix for suffix in suffixes)
+        if not any(name in env or name + "_FILE" in env for name in names):
+            continue
+        values = {}
+        for name in names:
+            if name in env and name + "_FILE" in env:
+                raise LongbridgeError(
+                    "Set only one of a credential variable and its _FILE variant"
+                )
+            if name in env:
+                values[name] = env[name]
+            elif name + "_FILE" in env:
+                try:
+                    values[name] = (
+                        Path(env[name + "_FILE"])
+                        .read_text(encoding="utf-8-sig")
+                        .strip()
+                    )
+                except (OSError, ValueError, UnicodeError):
+                    raise LongbridgeError(
+                        "Cannot read Longbridge credential Secret file"
+                    ) from None
+        return complete(values, names)
+
+    selected_file = env_file or env.get("AKSHARE_QUOTE_ENV_FILE")
+    if selected_file is None:
+        return None
     from dotenv import dotenv_values
 
-    env = os.environ if environ is None else environ
-    path = Path(env_file or env.get("AKSHARE_QUOTE_ENV_FILE") or DEFAULT_ENV_FILE)
-    values = (
-        dotenv_values(path, interpolate=False, encoding="utf-8-sig")
-        if path.is_file()
-        else {}
-    )
-
-    def value(suffix, alias):
-        names = ("LONGBRIDGE_" + suffix, "LONGPORT_" + suffix)
-        # Generic aliases only apply to the explicitly selected file.
-        for source, keys in ((env, names), (values, (*names, alias))):
-            for key in keys:
-                item = source.get(key)
-                if item and item.strip():
-                    return item.strip()
-        return None
-
-    key, secret, token = (
-        value(s, a)
-        for s, a in (
-            ("APP_KEY", "APPKEY"),
-            ("APP_SECRET", "AppSecretLong"),
-            ("ACCESS_TOKEN", "AccessToken"),
-        )
-    )
-    return QuoteCredentials(key, secret, token) if key and secret and token else None
+    try:
+        path = Path(selected_file)
+        if not path.is_file():
+            raise LongbridgeError(
+                "Configured Longbridge credential file does not exist"
+            )
+        values = dotenv_values(path, interpolate=False, encoding="utf-8-sig")
+    except (OSError, ValueError, UnicodeError):
+        raise LongbridgeError(
+            "Cannot read configured Longbridge credential file"
+        ) from None
+    for names in (
+        tuple("LONGBRIDGE_" + s for s in suffixes),
+        tuple("LONGPORT_" + s for s in suffixes),
+        ("APPKEY", "AppSecretLong", "AccessToken"),
+    ):
+        if any(name in values for name in names):
+            return complete(values, names)
+    raise LongbridgeError("Configured file contains no Longbridge credentials")
 
 
 def official_credentials_available():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -169,11 +170,18 @@ def main():
     )
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--timeout", type=float, default=6)
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="Explicit private credential file; environment credentials take precedence",
+    )
     parser.add_argument("--max-age", type=float, default=1200)
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--format", choices=("table", "json"), default="table")
     parser.add_argument("--output", type=Path, help="Save full evidence as JSON")
     args = parser.parse_args()
+    if args.env_file is not None:
+        os.environ["AKSHARE_QUOTE_ENV_FILE"] = str(args.env_file)
     symbols = args.symbols.split(",") if args.symbols else MAJOR_SYMBOLS
     snapshots = fetch_market_snapshots(
         symbols,

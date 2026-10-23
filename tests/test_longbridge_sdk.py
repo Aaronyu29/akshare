@@ -48,20 +48,26 @@ class CredentialsTests(unittest.TestCase):
             self.assertEqual(creds.app_secret, "${LITERAL}")
             self.assertEqual(creds.app_key, "file-key")
             overridden = ls.read_quote_credentials(
-                file, {"LONGBRIDGE_APP_KEY": "env-key"}
+                file,
+                {
+                    "LONGBRIDGE_APP_KEY": "env-key",
+                    "LONGBRIDGE_APP_SECRET": "env-secret",
+                    "LONGBRIDGE_ACCESS_TOKEN": "env-token",
+                },
             )
             self.assertEqual(overridden.app_key, "env-key")
             self.assertNotIn("file-token", repr(creds))
             file.write_text(
                 "APPKEY=x\nAPPSecret=lark-secret\nAccessToken=y", encoding="utf-8"
             )
-            self.assertIsNone(ls.read_quote_credentials(file, {}))
+            with self.assertRaises(ls.LongbridgeError):
+                ls.read_quote_credentials(file, {})
 
     def test_generic_environment_aliases_are_ignored(self):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory():
             self.assertIsNone(
                 ls.read_quote_credentials(
-                    Path(folder) / "missing",
+                    None,
                     {
                         "APPKEY": "x",
                         "AppSecretLong": "y",
@@ -89,6 +95,47 @@ class CredentialsTests(unittest.TestCase):
             from longbridge.openapi import QuoteTransport
 
             self.assertEqual(kwargs["quote_transport"], QuoteTransport.Http)
+
+    def test_default_never_searches_host_files_or_working_directory(self):
+        with patch.object(
+            Path, "is_file", side_effect=AssertionError("must not probe host paths")
+        ):
+            self.assertIsNone(ls.read_quote_credentials(environ={}))
+
+    def test_incomplete_environment_does_not_merge_with_file_or_legacy(self):
+        with self.assertRaisesRegex(ls.LongbridgeError, "Incomplete"):
+            ls.read_quote_credentials(
+                environ={
+                    "LONGBRIDGE_APP_KEY": "partial-key",
+                    "LONGPORT_APP_KEY": "legacy-key",
+                    "LONGPORT_APP_SECRET": "secret",
+                    "LONGPORT_ACCESS_TOKEN": "token",
+                    "AKSHARE_QUOTE_ENV_FILE": "/should/not/read",
+                }
+            )
+
+    def test_mounted_secret_files_and_errors_are_sanitized(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = {}
+            for suffix in ("APP_KEY", "APP_SECRET", "ACCESS_TOKEN"):
+                path = Path(folder) / suffix
+                path.write_text("private-value-" + suffix + "\n", encoding="utf-8")
+                paths["LONGBRIDGE_" + suffix + "_FILE"] = str(path)
+            creds = ls.read_quote_credentials(environ=paths)
+            self.assertEqual(creds.access_token, "private-value-ACCESS_TOKEN")
+            with self.assertRaisesRegex(ls.LongbridgeError, "only one"):
+                ls.read_quote_credentials(
+                    environ={**paths, "LONGBRIDGE_APP_KEY": "secret"}
+                )
+            paths["LONGBRIDGE_APP_KEY_FILE"] = str(Path(folder) / "secret-private-path")
+            with self.assertRaises(ls.LongbridgeError) as caught:
+                ls.read_quote_credentials(environ=paths)
+            self.assertNotIn("secret-private-path", str(caught.exception))
+
+    def test_missing_explicit_file_is_an_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ls.LongbridgeError):
+                ls.read_quote_credentials(Path(folder) / "missing", {})
 
 
 class OfficialQuoteTests(unittest.TestCase):

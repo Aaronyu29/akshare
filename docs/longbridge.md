@@ -16,7 +16,20 @@
 python -m pip install -e ".[quotes]"
 ```
 
-默认读取 `C:\githubProject\.env-lark` 中的三个长桥字段。不会修改该文件，也不会把飞书凭据加载到进程环境。
+生产环境优先使用标准环境变量或 Secret 文件挂载。代码不包含固定的 Windows 凭据路径，不自动搜索工作目录的 `.env` 文件。仓库根目录的 [`.env.example`](../.env.example) 只包含配置名和空值。
+
+配置优先级：完整的 `LONGBRIDGE_*` 环境变量组（支持各项 `_FILE`）→ 完整的旧 `LONGPORT_*` 环境变量组 → 显式选定的 dotenv 文件。每组必须三项齐全，不跨环境变量、文件或命名组拼接凭据；配置不完整时明确报错。环境变量组完整时，不读取文件。
+
+本机已有的 `C:\githubProject\.env-lark` 可以继续使用，但需要显式指定：
+
+```powershell
+$env:AKSHARE_QUOTE_ENV_FILE = 'C:\githubProject\.env-lark'
+python -m stock_alert.us_quotes TSM --all-sessions
+# 也可以只为本次调用选择文件
+python -m stock_alert.us_quotes TSM --env-file 'C:\githubProject\.env-lark'
+```
+
+这个文件不会被修改或上传，也不会把飞书凭据加载到进程环境。仅对显式文件兼容以下旧字段：
 
 | 文件内已有字段 | 对应长桥标准字段 |
 | --- | --- |
@@ -24,7 +37,7 @@ python -m pip install -e ".[quotes]"
 | `AppSecretLong` | `LONGBRIDGE_APP_SECRET` |
 | `AccessToken` | `LONGBRIDGE_ACCESS_TOKEN` |
 
-`APPSecret` 是其他服务的字段，不用于长桥。支持标准 `LONGBRIDGE_*` 和旧的 `LONGPORT_*` 三项环境变量，环境变量优先于文件。通用别名仅在选定文件内识别。文件内容不做 `${...}` 替换，支持 UTF-8 BOM。
+`APPSecret` 是其他服务的字段，不用于长桥。文件内容不做 `${...}` 替换，支持 UTF-8 BOM。
 
 其他机器可通过环境变量指定文件：
 
@@ -32,7 +45,25 @@ python -m pip install -e ".[quotes]"
 $env:AKSHARE_QUOTE_ENV_FILE = 'D:\private\longbridge.env'
 ```
 
-Python 可指定 `LongbridgeClient(env_file=...)`。不要把真实凭据写入代码、命令行参数、报告或 Git；`.env`、`.env.*` 已忽略。
+Python 可指定 `LongbridgeClient(env_file=...)`。不要把真实凭据写入代码、命令行参数、报告或 Git；`.env`、`.env.*`、`.env-*` 已忽略，只有 `.env.example` 作为空模板提交。
+
+### 云端与其他系统
+
+推荐由部署平台的 Secret 管理功能在进程启动时注入 `LONGBRIDGE_APP_KEY`、`LONGBRIDGE_APP_SECRET`、`LONGBRIDGE_ACCESS_TOKEN`。真实值不写进 Dockerfile、镜像、仓库、构建参数或 CI 测试配置。CI 使用模拟凭据，不需要真实 Token。
+
+容器挂载单独 Secret 文件时，可以仅设置路径变量：
+
+```text
+LONGBRIDGE_APP_KEY_FILE=/run/secrets/longbridge_app_key
+LONGBRIDGE_APP_SECRET_FILE=/run/secrets/longbridge_app_secret
+LONGBRIDGE_ACCESS_TOKEN_FILE=/run/secrets/longbridge_access_token
+```
+
+同一字段不能同时设置值和 `_FILE`。Secret 文件按 UTF-8 读取并去掉末尾空白。Linux 文件建议由服务运行账号持有，权限 `0600` 或只读 Secret 挂载。单机可把 `.env.example` 复制到 `/etc/akshare/longbridge.env` 后在服务器上填入值，并设置 `AKSHARE_QUOTE_ENV_FILE=/etc/akshare/longbridge.env`；无需把任何真实凭据复制到项目目录。
+
+更新 Token 后重新启动相应进程，让已创建的 SDK 上下文使用新凭据。错误和业务日志只记录代码、数据源、状态和时间，不记录环境变量全集、认证头或 SDK 配置对象。
+
+其他系统的安装、Python/跨语言调用、结果状态和集中采集建议见 [其他系统接入说明](integrating-other-systems.md)。
 
 ## 四时段报价
 

@@ -16,6 +16,7 @@ MANIFEST
 # Common venv naming conventions
 .env
 .env.*
+.env-*
 !.env.example
 .venv
 env/
