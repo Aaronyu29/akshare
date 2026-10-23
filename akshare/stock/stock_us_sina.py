@@ -7,7 +7,11 @@ https://finance.sina.com.cn/stock/usstock/sector.shtml
 """
 
 import json
+import math
+import re
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -83,13 +87,154 @@ def get_us_stock_name() -> pd.DataFrame:
     return big_df[["name", "cname", "symbol"]]
 
 
-def stock_us_spot() -> pd.DataFrame:
+def _us_quote_time(value, now):
+    """Parse Sina's yearless Eastern timestamp, including the year boundary."""
+    offsets = {"EDT": -4, "EST": -5}
+    try:
+        text, suffix = value.rsplit(" ", 1)
+        parsed = datetime.strptime(text, "%b %d %I:%M%p")
+        candidates = [
+            parsed.replace(year=year, tzinfo=timezone(timedelta(hours=offsets[suffix])))
+            for year in (now.year - 1, now.year, now.year + 1)
+        ]
+        return min(
+            candidates, key=lambda stamp: abs((now - stamp).total_seconds())
+        ).astimezone(ZoneInfo("America/New_York"))
+    except (ValueError, KeyError):
+        return None
+
+
+def _us_quote_session(stamp):
+    if stamp.weekday() >= 5:
+        return "closed"
+    minute = stamp.hour * 60 + stamp.minute
+    if 240 <= minute < 570:
+        return "premarket"
+    if 570 <= minute < 960:
+        return "regular"
+    if 960 <= minute < 1200:
+        return "after_hours"
+    return "overnight_unavailable"
+
+
+def _parse_us_single_quote(raw, symbol, now):
+    """Field mapping follows Sina's official ushttps/js/tool.js parser."""
+    feed_symbol = symbol.lower().replace(".", "$")
+    match = re.fullmatch(
+        r"\s*var\s+hq_str_gb_" + re.escape(feed_symbol) + r'="([^"]*)";?\s*', raw
+    )
+    if not match:
+        raise ValueError(f"Unexpected Sina response for {symbol}")
+    fields = match.group(1).split(",")
+    if len(fields) < 28:
+        raise ValueError(f"Sina quote unavailable for {symbol}")
+
+    def number(index, positive=False):
+        try:
+            value = float(fields[index])
+            return (
+                value if math.isfinite(value) and (not positive or value > 0) else None
+            )
+        except (ValueError, TypeError):
+            return None
+
+    now = now.astimezone(ZoneInfo("America/New_York"))
+    regular_time = _us_quote_time(fields[25], now)
+    extended_time = _us_quote_time(fields[24], now)
+    regular_price = number(1, positive=True)
+    extended_price = number(21, positive=True)
+    session = _us_quote_session(now)
+    if session == "regular":
+        stamp, price, change, change_percent = (
+            regular_time,
+            regular_price,
+            number(4),
+            number(2),
+        )
+    elif session in ("premarket", "after_hours"):
+        stamp, price, change, change_percent = (
+            extended_time,
+            extended_price,
+            number(23),
+            number(22),
+        )
+    else:
+        stamp, price, change, change_percent = None, None, None, None
+    age = (now - stamp).total_seconds() if stamp else None
+    error = None
+    if session in ("closed", "overnight_unavailable"):
+        error = "Sina does not provide a verified current quote for this session"
+    elif price is None or stamp is None:
+        error = f"{session} quote unavailable"
+    elif stamp.date() != now.date() or _us_quote_session(stamp) != session:
+        error = f"Source timestamp does not belong to the current {session} session"
+    elif age < -60 or age > 1200:
+        error = "Source timestamp is stale or in the future"
+    if error:
+        price, change, change_percent = None, None, None
+
+    def iso(stamp):
+        return stamp.isoformat() if stamp else None
+
+    return {
+        "symbol": symbol,
+        "cname": fields[0],
+        "price": price,
+        "diff": change,
+        "chg": change_percent,
+        "session": session,
+        "quote_time": iso(stamp),
+        "quote_age_seconds": age,
+        "regular_price": regular_price,
+        "regular_quote_time": iso(regular_time),
+        "extended_price": extended_price,
+        "extended_quote_time": iso(extended_time),
+        "currency": "USD",
+        "source": "sina-gb",
+        "error": error,
+        "fetched_at": now.isoformat(),
+    }
+
+
+def _stock_us_spot_single(symbol, timeout):
+    if not isinstance(symbol, str):
+        raise ValueError("symbol must be a single US stock ticker")
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9]*(?:[.$][A-Z0-9]+)*", symbol):
+        raise ValueError("symbol must be a single US stock ticker")
+    if timeout <= 0:
+        raise ValueError("timeout must be positive")
+    response = requests.get(
+        "https://hq.sinajs.cn/",
+        params={"list": "gb_" + symbol.lower().replace(".", "$")},
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://stock.finance.sina.com.cn/",
+        },
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    response.encoding = "gb18030"
+    row = _parse_us_single_quote(
+        response.text, symbol, datetime.now(ZoneInfo("America/New_York"))
+    )
+    return pd.DataFrame([row])
+
+
+def stock_us_spot(symbol: str | None = None, timeout: float = 10) -> pd.DataFrame:
     """
-    新浪财经-所有美股的数据, 注意延迟 15 分钟
-    https://finance.sina.com.cn/stock/usstock/sector.shtml
-    :return: 美股所有股票实时行情
+    新浪财经-美股行情。本地扩展：传 symbol 时只请求一只股票。
+    不传 symbol 保持全市场查询；全市场列表有 15 分钟延迟。
+    单股查询分别解析常规、盘前和盘后报价，延迟以供应商为准。
+    当前时段缺失、夜盘或时间超过 20 分钟时 price 为空，原因见 error。
+    https://stock.finance.sina.com.cn/usstock/quotes/MU.html
+    :param symbol: 单只美股代码，如 MU；None 返回全市场
+    :param timeout: 单股请求超时，单位秒
+    :return: 全市场列表，或含 price/session/quote_time 的单股 DataFrame
     :rtype: pandas.DataFrame
     """
+    if symbol is not None:
+        return _stock_us_spot_single(symbol, timeout)
     big_df = pd.DataFrame()
     page_count = __get_us_page_count()
     for page in tqdm(range(1, page_count + 1), leave=False):
@@ -120,10 +265,10 @@ def stock_us_daily(symbol: str = "FB", adjust: str = "") -> pd.DataFrame:
     https://finance.sina.com.cn/stock/usstock/sector.shtml
     备注：
     1. CIEN 新浪复权因子错误
-    2. AI 新浪复权因子错误, 该股票刚上市未发生复权, 但是返回复权因子
+    2. AI 新浪复权因子错误，该股票刚上市未发生复权，但是返回复权因子
     :param symbol: 可以使用 get_us_stock_name 获取
     :type symbol: str
-    :param adjust: "": 返回未复权的数据 ; qfq: 返回前复权后的数据; qfq-factor: 返回前复权因子和调整;
+    :param adjust: "": 返回未复权的数据 ; qfq: 返回前复权后的数据；qfq-factor: 返回前复权因子和调整；
     :type adjust: str
     :return: 指定 adjust 的数据
     :rtype: pandas.DataFrame
@@ -224,7 +369,7 @@ if __name__ == "__main__":
     stock_us_daily_df = stock_us_daily(symbol=".DJI", adjust="")
     print(stock_us_daily_df)
 
-    stock_us_daily_qfq_df = stock_us_daily(symbol='WOLF', adjust='qfq')
+    stock_us_daily_qfq_df = stock_us_daily(symbol="WOLF", adjust="qfq")
     print(stock_us_daily_qfq_df)
 
     stock_us_daily_qfq_factor_df = stock_us_daily(symbol="AAPL", adjust="qfq-factor")
