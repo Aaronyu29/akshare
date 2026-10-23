@@ -3781,9 +3781,10 @@ print(stock_us_spot_em_df)
 
 输入参数
 
-| 名称  | 类型  | 描述  |
-|-----|-----|-----|
-| -   | -   | -   |
+| 名称 | 类型 | 描述 |
+| --- | --- | --- |
+| symbol | str | 本地扩展；如 MU；默认 None 返回全市场 |
+| timeout | float | 本地扩展；单股请求超时秒数；默认 10 |
 
 输出参数
 
@@ -3851,6 +3852,20 @@ print(us_stock_current_df)
 77  13356251   121302156830   29.94505474    NYSE         700
 78         0   121175090554          None    AMEX        None
 79   3089789   120621698914   15.65011561    NYSE         750
+```
+
+本机扩展：`ak.stock_us_spot(symbol="MU", timeout=10)` 只请求指定股票一次，不进行全市场分页。
+
+返回的 `price`、`diff`、`chg` 属于当前 `session`（`premarket`、`regular`、`after_hours`）；
+`quote_time` 是上游行情时间（含美东时区），`fetched_at` 是请求完成时间。
+`regular_price`/`regular_quote_time` 与 `extended_price`/`extended_quote_time` 保留各时段原始报价。
+当前时段没有有效报价、行情时间超过 20 分钟、周末或夜盘时，`price` 为空，`error` 给出原因；
+不会用昨收补充盘前、盘后或夜盘。`quote_age_seconds` 只反映上游标记时间距获取时间的差，不能证明数据没有延迟。
+不传 `symbol` 的原有全市场接口保持不变。此参数是本地扩展，官方 1.19.1 尚未提供。
+
+```python
+mu = ak.stock_us_spot(symbol="MU")
+print(mu[["symbol", "price", "session", "quote_time", "error"]])
 ```
 
 ### 历史行情数据-东财

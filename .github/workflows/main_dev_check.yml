@@ -71,10 +71,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install locked dependencies
-        run: uv sync --locked --no-default-groups --group test
+        run: uv sync --locked --no-default-groups --group test --extra quotes
 
       - name: Test with pytest
-        run: uv run --locked --no-default-groups --group test pytest
+        run: uv run --locked --no-default-groups --group test --extra quotes pytest
 
   # build_registry.py 只依赖标准库（argparse/ast/json/pathlib/re/typing），
   # 无需安装项目或任何第三方包，因此这里保持最轻量的裸 Python。
